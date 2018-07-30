@@ -1,0 +1,174 @@
+
+#include <packs/mp.fxh/VertexFeatureFlags.fxh>
+
+ByteAddressBuffer VertexData : VERTEXDATA;
+#if !defined(VERTSIZE)
+#define VERTSIZE 0
+#endif
+
+ByteAddressBuffer SkinningWeights : SKINNINGWEIGHTS;
+#if !defined(VERTWEIGHTSIZE)
+#define VERTWEIGHTSIZE 64
+#endif
+ByteAddressBuffer BoneBindingInfo : BONEBINDINGINFO;
+#define BBIELSIZE 68
+/*
+ *	uint BoneID
+ *	float4x4 InverseBindingMatrix
+ */
+StructuredBuffer<float4x4> BoneMatrices : BONEMATRICES;
+StructuredBuffer<float4x4> PrevBoneMatrices : PREVBONEMATRICES;
+#if !defined(BONESETSIZE)
+#define BONESETSIZE 32
+#endif
+
+ByteAddressBuffer ShapeData : SHAPEDATA;
+#define SHAPEVERTSIZE 24
+ByteAddressBuffer ShapeMeta : SHAPEMETA;
+#define SHAPEMETASIZE 12
+ByteAddressBuffer ShapeWeights : SHAPEWEIGHTS;
+/*  weights:
+ *  	weight[shapecount]: (8)
+ *			float current
+ *			float previous
+ */
+
+struct GSin
+{
+    /*outstruct*/
+};
+
+GSin VS(uint vid : SV_VertexID, uint iid : SV_InstanceID)
+{
+    GSin o;
+
+	/*fillvs*/
+
+    #if defined(HAS_INSTANCEID)
+    o.instanceid = iid;
+    #endif
+    uint ssid = o.subsetid;
+	uint4 smeta = ShapeMeta.Load4(ssid * SHAPEMETASIZE);
+    float3 opos = o.position;
+    float3 onorm = o.normal;
+    #if defined(HAS_TANGENT)
+    float3 otang = o.tangent.xyz;
+    float3 obinorm = o.binormal.xyz;
+    #endif
+	#if defined(HAS_PREVPOS)
+	o.prevpos = o.position;
+	#endif
+
+    #if defined(DOBLENDSHAPES)
+    if(smeta.z != 0)
+    {
+        uint spvmi = o.subsetvertexid * SHAPEVERTSIZE + smeta.x;
+    	for(uint i=0; i<smeta.z; i++)
+    	{
+    		uint sva = spvmi + i * smeta.y;
+    		uint wa = i * 8 + iid * smeta.z * 8;
+
+    		float weight = asfloat(ShapeWeights.Load(wa));
+    		//float weight = tempw;
+    		float3 posdelta = asfloat(ShapeData.Load3(sva + 0)) - opos;
+    		float3 normdelta = asfloat(ShapeData.Load3(sva + 12)) - onorm;
+    		o.position += posdelta * weight;
+    		o.normal += normdelta * weight;
+
+    		#if defined(HAS_PREVPOS)
+    		float pweight = asfloat(ShapeWeights.Load(wa + 4));
+    		o.prevpos += posdelta * pweight;
+    		#endif
+        }
+        o.normal = normalize(o.normal);
+    }
+    #endif
+
+    #if defined(DOSKINNING)
+    uint2 winfo = SkinningWeights.Load2(vid * VERTWEIGHTSIZE);
+    if(winfo.x != 0)
+    {
+        float3 npos = 0;
+        float3 nnorm = 0;
+        #if defined(HAS_TANGENT)
+    	bool hastans = (o.featureflags & FLAG_TANGENT) > 0;
+        float3 ntang = 0;
+        float3 nbinorm = 0;
+        #endif
+        #if defined(HAS_PREVPOS)
+        float3 nppos = 0;
+        #endif
+
+        for(uint i=0; i<winfo.x; i++)
+        {
+            uint2 wpair = SkinningWeights.Load2(vid * VERTWEIGHTSIZE + 8 + i*8);
+            float weight = asfloat(wpair.y);
+            uint bid = wpair.x;
+	        uint selbone = BoneBindingInfo.Load(bid * BBIELSIZE);
+
+            float4x4 invmat = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+            [unroll]
+            for(uint ii=0; ii<4; ii++)
+            {
+                [unroll]
+                for(uint jj=0; jj<4; jj++)
+                {
+                    invmat[ii][jj] = asfloat(BoneBindingInfo.Load(bid * BBIELSIZE + 4 + ii*16 + jj*4 ));
+                }
+            }
+        	float4x4 bonemat = mul(invmat, BoneMatrices[selbone + iid * BONESETSIZE]);
+
+        	npos += mul(float4(o.position, 1), bonemat).xyz * weight;
+        	nnorm += mul(float4(o.normal, 0), bonemat).xyz * weight;
+
+            #if defined(HAS_TANGENT)
+        	if(hastans)
+        	{
+        		ntang += mul(float4(o.tangent.xyz, 0), bonemat).xyz * weight;
+        		nbinorm += mul(float4(o.binormal.xyz, 0), bonemat).xyz * weight;
+            }
+            #endif
+            #if defined(HAS_PREVPOS)
+        	float4x4 pbonemat = mul(invmat, PrevBoneMatrices[selbone + iid * BONESETSIZE]);
+        	nppos += mul(float4(o.prevpos, 1), pbonemat).xyz * weight;
+            #endif
+        }
+        o.position = npos;
+        o.normal = (all(nnorm)) ? normalize(nnorm) : o.normal;
+        #if defined(HAS_TANGENT)
+        o.tangent.xyz = (all(ntang)) ? normalize(ntang) : o.tangent.xyz;
+        o.binormal.xyz = (all(nbinorm)) ? normalize(nbinorm) : o.binormal.xyz;
+        #endif
+        #if defined(HAS_PREVPOS)
+        o.prevpos = nppos;
+        #endif
+    }
+    #endif
+
+    return o;
+}
+[maxvertexcount(3)]
+void GS(triangle GSin input[3], inout TriangleStream<GSin>GSOut)
+{
+	GSin v = (GSin)0;
+
+	for(uint i=0;i<3;i++)
+	{
+		v=input[i];
+		GSOut.Append(v);
+	}
+}
+
+GeometryShader StreamOutGS = ConstructGSWithSO( CompileShader( gs_5_0, GS() ), STREAMOUTLAYOUT );
+
+technique11 Layout
+{
+	pass P0
+	{
+
+		SetVertexShader( CompileShader( vs_5_0, VS() ) );
+		SetGeometryShader( CompileShader( gs_5_0, GS() ) );
+	    SetGeometryShader( StreamOutGS );
+
+	}
+}

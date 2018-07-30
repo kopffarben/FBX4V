@@ -1,0 +1,13 @@
+<!DOCTYPE PATCH  SYSTEM "http://vvvv.org/versions/vvvv50alpha34.106.dtd" >
+   <PATCH nodename="C:\vvvv\app\vvvv-vpm\packs\FBX4V\nodes\modules\S (FBX4V.Value Internal).v4p" systemname="S (FBX4V.Value Internal)" filename="C:\vvvv\app\vvvv-vpm\packs\FBX4V\nodes\modules\S (FBX4V.Value Internal).v4p">
+   <BOUNDS type="Window" left="7440" top="6915" width="9000" height="6000">
+   </BOUNDS>
+   <PACK Name="vvvv-Message" Version="2.9.0">
+   </PACK>
+   <PACK Name="vvvv-ZeroMQ" Version="0.5.3">
+   </PACK>
+   <PACK Name="vvvv-ZeroMQ_Release_x64" Version="0.5.0">
+   </PACK>
+   <PACK Name="addonpack" Version="34.101.0">
+   </PACK>
+   </PATCH>
